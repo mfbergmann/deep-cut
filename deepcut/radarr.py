@@ -1,5 +1,6 @@
 """The small slice of the Radarr v3 API Deep Cut uses."""
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -76,6 +77,12 @@ def alt_titles(m):
         t = a.get("title")
         if t:
             titles.append(t)
+    # "Divine Horsemen: The Living Gods of Haiti" is usually uploaded as just
+    # "Divine Horsemen"; the part before a colon is worth searching on its own.
+    for t in list(titles):
+        head = re.split(r"\s*[:–—-]\s+", t, maxsplit=1)[0]
+        if head != t and len(head) >= 6:
+            titles.append(head)
     seen, out = set(), []
     for t in titles:
         k = t.strip().lower()
@@ -96,7 +103,10 @@ def manual_import(movie_id, folder):
     files are named however the uploader named them, and a person has already
     confirmed which film this is.
     """
-    items = get("/api/v3/manualimport", folder=folder, movieId=movie_id, filterExistingFiles="false") or []
+    # No movieId here: with one, Radarr scans the *movie's* library folder
+    # (which does not exist yet for a missing film) instead of `folder`, and
+    # returns a 500. The film is assigned in the POST below instead.
+    items = get("/api/v3/manualimport", folder=folder, filterExistingFiles="false") or []
     files = []
     for it in items:
         path = it.get("path", "")
@@ -107,7 +117,7 @@ def manual_import(movie_id, folder):
             "movieId": movie_id,
             "quality": it.get("quality") or {"quality": {"id": 0, "name": "Unknown"}, "revision": {"version": 1}},
             "languages": it.get("languages") or [{"id": 1, "name": "English"}],
-            "releaseGroup": it.get("releaseGroup") or "DeepCut",
+            "releaseGroup": "DeepCut",  # parsed groups are noise here (e.g. the tail of a YouTube id)
             "downloadId": "",
         })
     if not files:

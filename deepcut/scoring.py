@@ -25,6 +25,22 @@ NOT_THE_FILM = [
 ]
 
 
+# The film, but not as made: a new score over a silent film, a colorization,
+# an upscale, a fan edit. Still the right film, so these are shown -- ranked
+# below the original and labelled, so nobody imports one by accident.
+ALTERED = [
+    ("music added", "new soundtrack"), ("new soundtrack", "new soundtrack"),
+    ("new soudntrack", "new soundtrack"), ("new music", "new soundtrack"),
+    ("new score", "new soundtrack"), ("rescore", "new soundtrack"), ("re score", "new soundtrack"),
+    ("sound design", "new soundtrack"), ("original music by", "new soundtrack"),
+    ("music by", "new soundtrack"), ("musica", "new soundtrack"), ("new audio", "new soundtrack"),
+    ("colorized", "colorized"), ("colourized", "colorized"), ("a color", "colorized"),
+    ("in color", "colorized"), ("upscale", "AI upscale"), ("upscaled", "AI upscale"),
+    ("ai enhanced", "AI upscale"), ("4k remaster ai", "AI upscale"), ("fan edit", "fan edit"),
+    ("re edit", "fan edit"), ("reedit", "fan edit"),
+]
+
+
 def norm(s):
     s = unicodedata.normalize("NFKD", s or "")
     s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
@@ -112,6 +128,11 @@ def score(movie, cand_title, duration, extra_text=""):
     if hits:
         pts -= 40
         reasons.append("looks like a " + hits[0])
+
+    altered = sorted({label for w, label in ALTERED if re.search(rf"\b{re.escape(w)}\b", title_n) and w not in movie_title_n})
+    if altered:
+        pts -= 25
+        reasons.append("ALTERED: " + ", ".join(altered))
 
     if re.search(r"\bfull (movie|film)\b|\bcomplete film\b", title_n):
         pts += 5

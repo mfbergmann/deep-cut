@@ -91,7 +91,7 @@ def set_dismissed(radarr_id, value):
         con.execute("UPDATE movies SET dismissed=? WHERE radarr_id=?", (1 if value else 0, radarr_id))
 
 
-def add_candidate(c):
+def add_candidate(c, insert=True):
     """Insert a candidate unless this source item is already known for this film.
 
     A rejected candidate must stay rejected across rescans, so an existing row
@@ -109,6 +109,8 @@ def add_candidate(c):
                     "UPDATE candidates SET score=?, reasons=?, updated=? WHERE id=?",
                     (c["score"], json.dumps(c["reasons"]), now, cur["id"]),
                 )
+            return False
+        if not insert:
             return False
         con.execute(
             """INSERT INTO candidates

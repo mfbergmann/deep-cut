@@ -35,6 +35,12 @@ def candidates(titles, year, director):
     main = titles[0]
     surname = (director or "").split(",")[0].strip()
     queries = [f"{main} {year} {surname}".strip(), f"{main} {year} full film"]
+    # A shorter form of the title (the part before a colon) is often how it
+    # was uploaded.
+    for t in titles[1:]:
+        if len(t) < len(main) and main.lower().startswith(t.lower()):
+            queries.append(f"{t} {year} {surname}".strip())
+            break
     seen = set()
     for q in queries:
         for e in _search(q):

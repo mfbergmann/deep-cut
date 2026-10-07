@@ -53,7 +53,7 @@ def search_movie(m):
     }
     found = []
     sources = [
-        ("archive", lambda: archive.candidates(scoring_movie["titles"], info["year"])),
+        ("archive", lambda: archive.candidates(scoring_movie["titles"], info["year"], info["director"])),
         ("youtube", lambda: youtube.candidates(scoring_movie["titles"], info["year"], info["director"])),
     ]
     for name, fn in sources:
@@ -67,7 +67,9 @@ def search_movie(m):
         except Exception as e:
             log.warning("%s search failed for %s: %s", name, info["title"], e)
     found.sort(key=lambda c: c["score"], reverse=True)
-    new = sum(1 for c in found[:MAX_CANDIDATES] if store.add_candidate(c))
+    # Every known candidate is re-scored (so a scoring change reaches it even
+    # when it no longer makes the top N); only the top N are added as new.
+    new = sum(1 for i, c in enumerate(found) if store.add_candidate(c, insert=i < MAX_CANDIDATES))
     store.mark_scanned(info["radarr_id"])
     return new
 

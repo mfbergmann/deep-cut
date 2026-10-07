@@ -7,6 +7,7 @@ the file that was approved for it.
 import logging
 import os
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -19,6 +20,8 @@ from .sources.youtube import ytdlp
 
 log = logging.getLogger("deepcut.download")
 _q = queue.Queue()
+# A finished video: yt-dlp intermediates (.fNNN.ext) and .part files do not count.
+VIDEO = re.compile(r"(?<!\.f\d{3})\.(mkv|mp4|m4v|avi|mov|mpe?g|ogv|webm|wmv)$", re.I)
 
 
 def enqueue(cid):
@@ -63,11 +66,29 @@ def process(cid):
         store.set_state(cid, "failed", "film already has a file in Radarr; nothing downloaded")
         return
     dest = os.path.join(STAGING_DIR, str(c["radarr_id"]))
-    shutil.rmtree(dest, ignore_errors=True)
+    marker = os.path.join(dest, ".candidate")
+    # A finished download for this same candidate is reused (a retry after a
+    # failed import should not fetch gigabytes again). Anything else in the
+    # folder -- another candidate's file, or a partial download -- is cleared.
+    reuse = False
+    if os.path.isdir(dest):
+        try:
+            same = open(marker).read().strip() == str(cid)
+        except OSError:
+            same = False
+        done = [f for f in os.listdir(dest) if VIDEO.search(f)]
+        if same and done:
+            reuse = True
+        else:
+            shutil.rmtree(dest, ignore_errors=True)
     os.makedirs(dest, exist_ok=True)
+    with open(marker, "w") as f:
+        f.write(str(cid))
     store.set_state(cid, "downloading")
     try:
-        if c["source"] == "archive":
+        if reuse:
+            log.info("reusing finished download for candidate %s", cid)
+        elif c["source"] == "archive":
             _fetch_archive(c["download"], dest, c["meta"].get("file") or "video")
         else:
             _fetch_youtube(c["download"], dest)

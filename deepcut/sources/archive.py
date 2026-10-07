@@ -23,10 +23,35 @@ def _q(s):
     return '"' + re.sub(r'["\\:()\[\]{}^~*?]', " ", s).strip() + '"'
 
 
-def search(titles, year, limit=12):
-    ids, out = set(), []
+def queries(titles, year, director):
+    """Plain title first, then narrowed by year and director.
+
+    A common title ("Macbeth") returns hundreds of items and the right one is
+    rarely in the first page; adding the year or director is what finds it.
+    """
+    surname = ""
+    if director:
+        first = director.split(",")[0].strip().split()
+        surname = first[-1] if first else ""
+    qs = []
     for t in titles[:3]:
-        q = f"title:({_q(t)}) AND mediatype:(movies)"
+        base = f"title:({_q(t)}) AND mediatype:(movies)"
+        qs.append(base)
+        if year:
+            qs.append(f"{base} AND (year:{year} OR date:{year}* OR title:({year}))")
+        if surname:
+            qs.append(f"{base} AND (creator:({_q(surname)}) OR description:({_q(surname)}) OR title:({_q(surname)}))")
+    seen, out = set(), []
+    for q in qs:
+        if q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out
+
+
+def search(titles, year, director="", limit=12):
+    ids, out = set(), []
+    for q in queries(titles, year, director):
         url = "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(
             [("q", q), ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "year"),
              ("fl[]", "creator"), ("fl[]", "downloads"), ("rows", str(limit)), ("output", "json")]
@@ -73,9 +98,9 @@ def best_file(identifier):
     return meta, f
 
 
-def candidates(titles, year):
+def candidates(titles, year, director=""):
     """Yield dicts: ext_id, title, url, preview, download, duration, text, meta."""
-    for doc in search(titles, year):
+    for doc in search(titles, year, director)[:25]:
         ident = doc["identifier"]
         try:
             meta, f = best_file(ident)
