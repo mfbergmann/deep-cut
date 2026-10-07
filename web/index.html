@@ -110,7 +110,7 @@ function candRow(f, c) {
   const cls = c.score >= 70 ? "hi" : c.score >= 55 ? "mid" : "";
   const extra = c.source === "archive"
     ? `${c.meta.original ? "original upload" : "derivative"} · ${c.meta.resolution} · ${(c.meta.size / 1e9).toFixed(2)} GB`
-    : `${esc(c.meta.channel || "")}${c.meta.views ? " · " + Number(c.meta.views).toLocaleString() + " views" : ""}`;
+    : `${esc(c.meta.channel || "")}${c.meta.resolution ? " · " + esc(c.meta.resolution) : ""}${c.meta.views ? " · " + Number(c.meta.views).toLocaleString() + " views" : ""}`;
   let actions = "";
   if (c.state === "new") actions = `
       <button data-act="preview" data-id="${c.id}">${open.has(c.id) ? "Hide" : "Preview"}</button>

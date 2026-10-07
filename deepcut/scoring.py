@@ -41,6 +41,21 @@ ALTERED = [
 ]
 
 
+# Phrases that, in an upload's *description*, mean the soundtrack is not the
+# original. Narrower than ALTERED, because descriptions mention music freely
+# ("score by Teiji Ito" can describe the original).
+ALTERED_DESC = [
+    ("improvisation to", "live re-score"), ("improvised", "live re-score"),
+    ("live score", "live re-score"), ("cine concert", "live re-score"),
+    ("cine-concert", "live re-score"), ("musique originale", "new soundtrack"),
+    ("new soundtrack", "new soundtrack"), ("new score", "new soundtrack"),
+    ("rescored", "new soundtrack"), ("re scored", "new soundtrack"),
+    ("my own soundtrack", "new soundtrack"), ("added music", "new soundtrack"),
+    ("music added", "new soundtrack"), ("colorized", "colorized"),
+    ("ai upscal", "AI upscale"), ("upscaled with", "AI upscale"),
+]
+
+
 def norm(s):
     s = unicodedata.normalize("NFKD", s or "")
     s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
@@ -129,7 +144,10 @@ def score(movie, cand_title, duration, extra_text=""):
         pts -= 40
         reasons.append("looks like a " + hits[0])
 
-    altered = sorted({label for w, label in ALTERED if re.search(rf"\b{re.escape(w)}\b", title_n) and w not in movie_title_n})
+    altered = {label for w, label in ALTERED if re.search(rf"\b{re.escape(w)}\b", title_n) and w not in movie_title_n}
+    desc_n = norm(extra_text or "")
+    altered |= {label for w, label in ALTERED_DESC if norm(w) in desc_n and norm(w) not in movie_title_n}
+    altered = sorted(altered)
     if altered:
         pts -= 25
         reasons.append("ALTERED: " + ", ".join(altered))

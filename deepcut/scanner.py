@@ -57,12 +57,27 @@ def search_movie(m):
         ("youtube", lambda: youtube.candidates(scoring_movie["titles"], info["year"], info["director"])),
     ]
     for name, fn in sources:
+        detailed = 0
         try:
             for c in fn():
                 pts, reasons, reject = scoring.score(scoring_movie, c["title"], c["duration"], c["text"])
-                if reject or pts < MIN_SCORE:
+                # Search results rarely carry the description, which is where a
+                # re-score is usually admitted. Fetch it for plausible hits only.
+                if name == "youtube" and not reject and pts >= MIN_SCORE and detailed < 10:
+                    detailed += 1
+                    d = youtube.details(c["ext_id"])
+                    if d:
+                        c["text"] = f"{c['text']} {d['description']}"
+                        c["meta"]["resolution"] = f"{d['height']}p" if d.get("height") else None
+                        pts, reasons, reject = scoring.score(scoring_movie, c["title"], c["duration"], c["text"])
+                if reject:
                     continue
                 c.update(source=name, radarr_id=info["radarr_id"], score=pts, reasons=reasons)
+                if pts < MIN_SCORE:
+                    # Not worth showing as new, but an existing row with this
+                    # id must still get its lowered score.
+                    store.add_candidate(c, insert=False)
+                    continue
                 found.append(c)
         except Exception as e:
             log.warning("%s search failed for %s: %s", name, info["title"], e)

@@ -61,3 +61,17 @@ def candidates(titles, year, director):
                     "views": e.get("view_count"),
                 },
             }
+
+
+def details(vid):
+    """Full metadata for one video: description (to spot re-scores) and best height."""
+    try:
+        p = subprocess.run(
+            [ytdlp(), "-j", "--no-warnings", "--no-update", "--skip-download",
+             f"https://www.youtube.com/watch?v={vid}"],
+            capture_output=True, text=True, timeout=120,
+        )
+        info = json.loads(p.stdout)
+    except Exception:
+        return None
+    return {"description": info.get("description") or "", "height": info.get("height")}
