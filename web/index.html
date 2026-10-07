@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep Cut</title>
+<link rel="icon" href="/logo.svg">
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e2e0da;
+    --accent: #b4441f; --ok: #2f7d4f; --warn: #a66a00; --bad: #a33a3a; --chip: #efede8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9a9890; --line: #33322f;
+            --accent: #e0774f; --ok: #5cb27f; --warn: #d9a441; --bad: #e07070; --chip: #2a2a27; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center;
+           padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 20px; margin: 0; display: flex; gap: 10px; align-items: center; }
+  header h1 img { width: 26px; height: 26px; }
+  .stat { color: var(--muted); font-size: 14px; }
+  .stat b { color: var(--ink); }
+  .spacer { flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .film { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          margin-bottom: 16px; overflow: hidden; }
+  .film-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+               padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .film-head h2 { font-size: 17px; margin: 0; }
+  .film-head .meta { color: var(--muted); font-size: 13px; }
+  .cand { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; padding: 12px 16px;
+          border-top: 1px solid var(--line); align-items: start; }
+  .cand:first-of-type { border-top: 0; }
+  .score { font-size: 20px; font-weight: 700; text-align: center; border-radius: 10px; padding: 6px 0; background: var(--chip); }
+  .score.hi { color: var(--ok); } .score.mid { color: var(--warn); }
+  .ctitle { font-weight: 600; word-break: break-word; }
+  .ctitle a { color: inherit; }
+  .src { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+         padding: 1px 7px; border-radius: 99px; background: var(--chip); color: var(--muted); margin-right: 6px; vertical-align: 1px; }
+  .reasons { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .reasons span:not(:last-child)::after { content: " · "; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .state { font-size: 13px; font-weight: 600; }
+  .state.imported { color: var(--ok); } .state.failed { color: var(--bad); }
+  .state.queued, .state.downloading { color: var(--warn); }
+  .err { color: var(--bad); font-size: 13px; margin-top: 4px; }
+  .preview { grid-column: 1 / -1; aspect-ratio: 16 / 9; width: 100%; max-height: 520px; border: 0; border-radius: 8px; background: #000; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  .none { padding: 12px 16px; color: var(--muted); font-size: 14px; }
+  .scanning { color: var(--warn); font-size: 14px; }
+  @media (max-width: 640px) {
+    .cand { grid-template-columns: 52px 1fr; }
+    .actions { grid-column: 1 / -1; justify-content: flex-start; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><img src="/logo.svg" alt="">Deep Cut</h1>
+  <span class="stat" id="stat"></span>
+  <span class="spacer"></span>
+  <span class="scanning" id="scanning"></span>
+  <button class="primary" id="scanAll">Search all now</button>
+</header>
+<main>
+  <div class="tabs" id="tabs">
+    <button data-tab="review" class="on">To review</button>
+    <button data-tab="active">Downloading</button>
+    <button data-tab="none">Nothing found</button>
+    <button data-tab="done">Imported</button>
+    <button data-tab="hidden">Dismissed</button>
+  </div>
+  <div id="list"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let films = [], tab = "review", open = new Set();
+
+function mmss(s) {
+  s = Math.round(s || 0); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`;
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
+}
+
+function bucket(f) {
+  const cs = f.candidates, st = s => cs.some(c => c.state === s);
+  if (f.dismissed) return "hidden";
+  if (st("imported")) return "done";
+  if (st("queued") || st("downloading") || st("failed")) return "active";
+  if (st("new")) return "review";
+  return "none";
+}
+
+function candRow(f, c) {
+  const cls = c.score >= 70 ? "hi" : c.score >= 55 ? "mid" : "";
+  const extra = c.source === "archive"
+    ? `${c.meta.original ? "original upload" : "derivative"} · ${c.meta.resolution} · ${(c.meta.size / 1e9).toFixed(2)} GB`
+    : `${esc(c.meta.channel || "")}${c.meta.views ? " · " + Number(c.meta.views).toLocaleString() + " views" : ""}`;
+  let actions = "";
+  if (c.state === "new") actions = `
+      <button data-act="preview" data-id="${c.id}">${open.has(c.id) ? "Hide" : "Preview"}</button>
+      <button class="ok" data-act="approve" data-id="${c.id}">Approve</button>
+      <button data-act="reject" data-id="${c.id}">Reject</button>`;
+  else if (c.state === "failed") actions = `<button data-act="approve" data-id="${c.id}">Retry</button><button data-act="reject" data-id="${c.id}">Reject</button>`;
+  else if (c.state === "rejected") actions = `<button data-act="restore" data-id="${c.id}">Undo reject</button>`;
+  else actions = `<span class="state ${c.state}">${c.state}</span>`;
+  return `<div class="cand">
+    <div class="score ${cls}" title="match score">${c.score}</div>
+    <div>
+      <div class="ctitle"><span class="src">${c.source === "archive" ? "Internet Archive" : "YouTube"}</span><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></div>
+      <div class="reasons">${c.duration ? `<span>${mmss(c.duration)}</span>` : ""}${c.reasons.map(r => `<span>${esc(r)}</span>`).join("")}</div>
+      <div class="reasons">${extra}</div>
+      ${c.error ? `<div class="err">${esc(c.error)}</div>` : ""}
+    </div>
+    <div class="actions">${actions}</div>
+    ${open.has(c.id) ? `<iframe class="preview" src="${esc(c.preview)}" allow="fullscreen; encrypted-media" allowfullscreen loading="lazy"></iframe>` : ""}
+  </div>`;
+}
+
+function render() {
+  const shown = films.filter(f => bucket(f) === tab);
+  if (!shown.length) {
+    $("#list").innerHTML = `<div class="empty">${{ review: "Nothing waiting for review.", active: "Nothing downloading.", none: "No films without results.", done: "Nothing imported yet.", hidden: "Nothing dismissed." }[tab]}</div>`;
+    return;
+  }
+  $("#list").innerHTML = shown.map(f => {
+    const want = tab === "review" ? ["new"] : tab === "active" ? ["queued", "downloading", "failed"] : tab === "done" ? ["imported"] : ["new", "rejected", "failed"];
+    const cs = f.candidates.filter(c => want.includes(c.state));
+    const rejected = f.candidates.filter(c => c.state === "rejected").length;
+    const scanned = f.last_scan ? new Date(f.last_scan * 1000).toLocaleDateString() : "never";
+    return `<section class="film">
+      <div class="film-head">
+        <h2>${esc(f.title)} <span class="meta">(${f.year || "?"})</span></h2>
+        <span class="meta">${f.director ? esc(f.director) + " · " : ""}${f.runtime ? f.runtime + " min" : "runtime unknown"} · searched ${scanned}${rejected ? ` · ${rejected} rejected` : ""}</span>
+        <span class="spacer"></span>
+        <button data-act="rescan" data-movie="${f.radarr_id}">Search again</button>
+        <button data-act="${f.dismissed ? "undismiss" : "dismiss"}" data-movie="${f.radarr_id}">${f.dismissed ? "Restore" : "Dismiss film"}</button>
+      </div>
+      ${cs.length ? cs.map(c => candRow(f, c)).join("") : `<div class="none">No candidates from the last search.</div>`}
+    </section>`;
+  }).join("");
+}
+
+async function refresh() {
+  try {
+    const [f, s] = await Promise.all([api("/api/films"), api("/api/summary")]);
+    films = f;
+    const last = s.last_scan ? new Date(s.last_scan.at * 1000).toLocaleString() : "never";
+    $("#stat").innerHTML = `<b>${s.to_review}</b> to review for <b>${s.films_waiting}</b> films · ${s.missing_tracked} missing tracked · last search ${last}`;
+    $("#scanning").textContent = s.scan.running ? `Searching ${s.scan.done}/${s.scan.total}${s.scan.current ? ": " + s.scan.current : ""}…` : (s.scan.last_error ? "Last search failed: " + s.scan.last_error : "");
+    $("#scanAll").disabled = s.scan.running;
+    render();
+  } catch (e) { $("#stat").textContent = "Cannot reach Deep Cut: " + e.message; }
+}
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.tab) {
+    tab = b.dataset.tab; document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b)); render(); return;
+  }
+  const act = b.dataset.act, id = b.dataset.id, mv = b.dataset.movie;
+  try {
+    if (act === "preview") { open.has(+id) ? open.delete(+id) : open.add(+id); render(); return; }
+    if (act === "approve") { if (!confirm("Download this and import it into Radarr as this film?")) return; await api(`/api/candidate/${id}/approve`, {}); }
+    if (act === "reject" || act === "restore") await api(`/api/candidate/${id}/${act}`, {});
+    if (act === "rescan") await api("/api/scan", { movieId: +mv });
+    if (act === "dismiss" || act === "undismiss") await api(`/api/film/${mv}/${act}`, {});
+    b.disabled = true; await refresh();
+  } catch (err) { alert(err.message); }
+});
+$("#scanAll").onclick = async () => { try { await api("/api/scan", {}); refresh(); } catch (e) { alert(e.message); } };
+
+refresh(); setInterval(refresh, 8000);
+</script>
+</body>
+</html>

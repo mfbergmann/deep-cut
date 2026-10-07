@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+name
+has_build
+autostart
+last_result.json
+started_at
+project_name

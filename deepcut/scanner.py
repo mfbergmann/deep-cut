@@ -1,0 +1,132 @@
+"""Finding candidates: which films to look for, and when."""
+import logging
+import os
+import shutil
+import subprocess
+import threading
+import time
+from datetime import datetime
+
+from . import radarr, scoring, store
+from .config import (MAX_CANDIDATES, MIN_AGE_DAYS, MIN_SCORE, RESCAN_DAYS,
+                     SCAN_HOUR, YTDLP_BAKED, YTDLP_LOCAL)
+from .sources import archive, youtube
+
+log = logging.getLogger("deepcut.scan")
+
+_scan_lock = threading.Lock()
+status = {"running": False, "current": None, "done": 0, "total": 0, "last_error": None}
+
+
+def ensure_ytdlp():
+    """Keep a self-updating yt-dlp in /config; YouTube breaks old versions within weeks."""
+    if not os.path.exists(YTDLP_LOCAL):
+        os.makedirs(os.path.dirname(YTDLP_LOCAL), exist_ok=True)
+        shutil.copy2(YTDLP_BAKED, YTDLP_LOCAL)
+        os.chmod(YTDLP_LOCAL, 0o755)
+    try:
+        p = subprocess.run([YTDLP_LOCAL, "-U"], capture_output=True, text=True, timeout=180)
+        log.info("yt-dlp update: %s", (p.stdout or p.stderr).strip().splitlines()[-1:] or "")
+    except Exception as e:  # never let an update failure stop a scan
+        log.warning("yt-dlp update failed: %s", e)
+
+
+def _movie_info(m):
+    return {
+        "radarr_id": m["id"],
+        "title": m["title"],
+        "year": m.get("year") or 0,
+        "runtime": m.get("runtime") or 0,
+        "director": radarr.director(m["id"]),
+    }
+
+
+def search_movie(m):
+    """Search every source for one Radarr movie; returns the number of new candidates."""
+    info = _movie_info(m)
+    store.upsert_movie(info)
+    scoring_movie = {
+        "titles": radarr.alt_titles(m),
+        "year": info["year"],
+        "runtime": info["runtime"],
+        "director": info["director"],
+    }
+    found = []
+    sources = [
+        ("archive", lambda: archive.candidates(scoring_movie["titles"], info["year"])),
+        ("youtube", lambda: youtube.candidates(scoring_movie["titles"], info["year"], info["director"])),
+    ]
+    for name, fn in sources:
+        try:
+            for c in fn():
+                pts, reasons, reject = scoring.score(scoring_movie, c["title"], c["duration"], c["text"])
+                if reject or pts < MIN_SCORE:
+                    continue
+                c.update(source=name, radarr_id=info["radarr_id"], score=pts, reasons=reasons)
+                found.append(c)
+        except Exception as e:
+            log.warning("%s search failed for %s: %s", name, info["title"], e)
+    found.sort(key=lambda c: c["score"], reverse=True)
+    new = sum(1 for c in found[:MAX_CANDIDATES] if store.add_candidate(c))
+    store.mark_scanned(info["radarr_id"])
+    return new
+
+
+def scan(force=False, only_id=None):
+    if not _scan_lock.acquire(blocking=False):
+        return False
+    try:
+        status.update(running=True, done=0, total=0, current=None, last_error=None)
+        ensure_ytdlp()
+        min_age = 0 if only_id else MIN_AGE_DAYS
+        movies = radarr.missing_movies(min_age)
+        if only_id:
+            movies = [m for m in movies if m["id"] == only_id]
+        else:
+            store.drop_movies_not_in([m["id"] for m in movies])
+        due = []
+        for m in movies:
+            known = store.movie(m["id"])
+            if known and known.get("dismissed") and not only_id:
+                continue
+            if not force and known and known.get("last_scan") and \
+                    time.time() - known["last_scan"] < RESCAN_DAYS * 86400:
+                continue
+            due.append(m)
+        status["total"] = len(due)
+        new_total = 0
+        for m in due:
+            status["current"] = m["title"]
+            new_total += search_movie(m)
+            status["done"] += 1
+            time.sleep(2)  # be polite to both sources
+        store.kv_set("last_scan", {"at": time.time(), "searched": len(due), "new": new_total})
+        log.info("scan complete: %d films searched, %d new candidates", len(due), new_total)
+        return True
+    except Exception as e:
+        status["last_error"] = str(e)
+        log.exception("scan failed")
+        return False
+    finally:
+        status.update(running=False, current=None)
+        _scan_lock.release()
+
+
+def start_scan(force=False, only_id=None):
+    t = threading.Thread(target=scan, kwargs={"force": force, "only_id": only_id}, daemon=True)
+    t.start()
+
+
+def scheduler():
+    """Daily scan at SCAN_HOUR; also once at startup if the last one is stale."""
+    last = store.kv_get("last_scan") or {}
+    if time.time() - last.get("at", 0) > 86400:
+        time.sleep(30)
+        scan()
+    while True:
+        now = datetime.now()
+        if now.hour == SCAN_HOUR:
+            last = store.kv_get("last_scan") or {}
+            if time.time() - last.get("at", 0) > 20 * 3600:
+                scan()
+        time.sleep(600)

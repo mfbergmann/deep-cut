@@ -1,0 +1,38 @@
+# Deep Cut on wintermute. Joins the arrs stack's network so Radarr resolves
+# as http://radarr:7878, and mounts /mnt/user/data at /data exactly as Radarr
+# does, so staging paths are valid for Radarr's manual import verbatim.
+services:
+  deep-cut:
+    build: .
+    image: deep-cut:local
+    container_name: deep-cut
+    user: "99:100"
+    environment:
+      - TZ=${TZ:-America/Toronto}
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - MIN_AGE_DAYS=${MIN_AGE_DAYS:-14}
+      - RESCAN_DAYS=${RESCAN_DAYS:-7}
+      - SCAN_HOUR=${SCAN_HOUR:-3}
+      - MIN_SCORE=${MIN_SCORE:-45}
+    volumes:
+      - /mnt/user/appdata/deep-cut:/config
+      - /mnt/user/data:/data
+    ports:
+      - "8473:8473"
+    networks:
+      - arrs-network
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    labels:
+      net.unraid.docker.managed: 'composeman'
+      net.unraid.docker.icon: 'http://100.64.39.125:8473/logo.svg'
+      net.unraid.docker.webui: 'http://[IP]:[PORT:8473]/'
+      net.unraid.docker.shell: ''
+
+networks:
+  # Owned by the arrs compose project; joined, never created, from here.
+  arrs-network:
+    external: true
