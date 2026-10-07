@@ -85,6 +85,32 @@ JavaScript runtime yt-dlp needs for YouTube's player challenges.
 | GET | `/api/missing` | missing films, for the picker |
 | GET | `/api/inbox-file/<path>` | streams an inbox file (Range-aware) for preview |
 
+## Uploading
+
+The page has an **Upload to inbox** button, and files can be dragged onto the
+page. Uploads stream to a hidden `.part` file in the inbox and are renamed
+when complete, so they are matched immediately. ISOs are refused: those belong
+to Disc Two.
+
+## Living alongside Disc Two
+
+[Disc Two](https://github.com/mfbergmann/disc-two) imports films from DVD
+ISOs. The two must never fight over a film:
+
+- **Deep Cut defers to the disc.** With Disc Two's review records mounted
+  read-only (`DISCTWO_REVIEW_DIR`), any film Disc Two is importing or has
+  imported is not searched, cannot be approved, and is listed under
+  **On disc**. The check is repeated just before anything is fetched.
+- **Disc Two replaces Deep Cut's stand-ins.** When it imports a disc's feature
+  into a film whose current file came from Deep Cut (release group
+  `DeepCut`), it encodes the disc feature first and only then removes the web
+  copy through Radarr. If the existing file is a real release, it skips the
+  feature and logs why, rather than writing a second feature into the folder.
+- Separate staging (`/data/deepcut/` vs Disc Two writing straight into the
+  film folder), separate ports (8473 / 8472). Extras folders (`Featurettes/`
+  etc.) are never touched by Deep Cut: Radarr's import and upgrades replace
+  only the main file.
+
 ## Not (yet) included
 
 UbuWeb has no search or API and its catalogue changes (titles are removed on
