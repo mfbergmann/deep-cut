@@ -170,7 +170,8 @@ def overview():
         by_movie.setdefault(c["radarr_id"], []).append(c)
     for m in movies:
         m["candidates"] = by_movie.get(m["radarr_id"], [])
-    return movies
+    # The unmatched-inbox placeholder is only a film while it holds files.
+    return [m for m in movies if m["radarr_id"] != 0 or m["candidates"]]
 
 
 def drop_movies_not_in(ids):

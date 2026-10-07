@@ -37,7 +37,7 @@ def summary():
     return {
         "to_review": pending,
         "films_waiting": films_waiting,
-        "missing_tracked": len(movies) - len(done),
+        "missing_tracked": len([m for m in movies if m["radarr_id"] != 0]) - len(done),
         "downloading": active,
         "imported": imported,
         "last_scan": store.kv_get("last_scan"),
