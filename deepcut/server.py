@@ -24,14 +24,16 @@ log = logging.getLogger("deepcut")
 
 def summary():
     movies = store.overview()
-    pending = sum(1 for m in movies if not m["dismissed"] for c in m["candidates"] if c["state"] == "new")
-    films_waiting = sum(1 for m in movies if not m["dismissed"] and any(c["state"] == "new" for c in m["candidates"]))
+    # A film with an imported candidate is done, whatever else is listed for it.
+    done = {m["radarr_id"] for m in movies if any(c["state"] == "imported" for c in m["candidates"])}
+    pending = sum(1 for m in movies if not m["dismissed"] and m["radarr_id"] not in done for c in m["candidates"] if c["state"] == "new")
+    films_waiting = sum(1 for m in movies if not m["dismissed"] and m["radarr_id"] not in done and any(c["state"] == "new" for c in m["candidates"]))
     imported = sum(1 for m in movies for c in m["candidates"] if c["state"] == "imported")
     active = sum(1 for m in movies for c in m["candidates"] if c["state"] in ("queued", "downloading"))
     return {
         "to_review": pending,
         "films_waiting": films_waiting,
-        "missing_tracked": len(movies),
+        "missing_tracked": len(movies) - len(done),
         "downloading": active,
         "imported": imported,
         "last_scan": store.kv_get("last_scan"),

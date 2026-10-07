@@ -174,6 +174,12 @@ def drop_movies_not_in(ids):
                 (rid,),
             ).fetchone()
             if busy:
+                # The film has its file; keep the imported row as history, but
+                # the alternatives nobody chose are no longer anything to review.
+                con.execute(
+                    "DELETE FROM candidates WHERE radarr_id=? AND state IN ('new','rejected','failed')",
+                    (rid,),
+                )
                 continue
             con.execute("DELETE FROM candidates WHERE radarr_id=?", (rid,))
             con.execute("DELETE FROM movies WHERE radarr_id=?", (rid,))
