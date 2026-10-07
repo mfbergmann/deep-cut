@@ -12,7 +12,7 @@ import os
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from . import downloader, inbox, radarr, scanner, store
 from .config import INBOX_SHARE, VIMEO_COOKIES, WEB_PORT
@@ -136,6 +136,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         p = urlparse(self.path).path
         n = int(self.headers.get("Content-Length") or 0)
+        if p == "/api/upload":
+            name = unquote(parse_qs(urlparse(self.path).query).get("name", [""])[0])
+            if n <= 0:
+                return self._json({"error": "empty upload"}, 400)
+            try:
+                saved = inbox.save_upload(name, self.rfile, n)
+            except ValueError as e:
+                # Drain the body so the browser sees the error, not a reset.
+                left = n
+                while left > 0:
+                    chunk = self.rfile.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    left -= len(chunk)
+                return self._json({"error": str(e)}, 400)
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
+            threading.Thread(target=scanner._poll_inbox, daemon=True).start()
+            return self._json({"saved": saved})
         try:
             body = json.loads(self.rfile.read(min(n, 65536)) or b"{}")
         except ValueError:

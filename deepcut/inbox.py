@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 import urllib.parse
 
@@ -26,6 +27,9 @@ log = logging.getLogger("deepcut.inbox")
 VIDEO = re.compile(r"\.(mkv|mp4|m4v|avi|mov|mpe?g|ogv|webm|wmv|ts|m2ts)$", re.I)
 UNMATCHED = 0
 _missing_cache = {"at": 0, "movies": []}
+# One poll at a time, and uploads register under the same lock: overlapping
+# polls would otherwise overwrite each other's record of settled files.
+_lock = threading.Lock()
 
 
 def ensure():
@@ -115,7 +119,54 @@ def _ensure_unmatched_row():
                             "year": 0, "runtime": 0, "director": ""})
 
 
+def save_upload(name, stream, length):
+    """Write an uploaded file into the inbox. Returns the inbox-relative name.
+
+    Written under a .part name and renamed when complete, so a poll can never
+    pick up a half-written file. Because it is known to be complete, it is
+    registered as settled and matched straight away.
+    """
+    ensure()
+    base = os.path.basename(name.replace("\\", "/")).strip().lstrip(".")
+    base = re.sub(r"[\x00-\x1f/]", "", base)
+    if base.lower().endswith(".iso"):
+        raise ValueError("ISOs go through ISOHungry/Disc Two (ripped movies folder), not the Deep Cut inbox")
+    if not base or not VIDEO.search(base):
+        raise ValueError("not a video file (" + (os.path.splitext(base)[1] or "no extension") + ")")
+    stem, ext = os.path.splitext(base)
+    final, n = base, 2
+    while os.path.exists(os.path.join(INBOX_DIR, final)):
+        final = f"{stem} ({n}){ext}"
+        n += 1
+    part = os.path.join(INBOX_DIR, "." + final + ".part")
+    left = length
+    with open(part, "wb") as f:
+        while left > 0:
+            chunk = stream.read(min(1 << 20, left))
+            if not chunk:
+                break
+            f.write(chunk)
+            left -= len(chunk)
+    if left > 0:
+        os.remove(part)
+        raise IOError("upload interrupted")
+    full = os.path.join(INBOX_DIR, final)
+    os.replace(part, full)
+    past = time.time() - 120
+    os.utime(full, (past, past))
+    with _lock:
+        sizes = store.kv_get("inbox_sizes", {})
+        sizes[final] = os.path.getsize(full)
+        store.kv_set("inbox_sizes", sizes)
+    return final
+
+
 def poll():
+    with _lock:
+        _poll()
+
+
+def _poll():
     ensure()
     files = _files()
     sizes = store.kv_get("inbox_sizes", {})

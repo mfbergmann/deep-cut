@@ -59,6 +59,9 @@
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
   .none { padding: 12px 16px; color: var(--muted); font-size: 14px; }
   .scanning { color: var(--warn); font-size: 14px; }
+  body.dragging::after { content: "Drop to upload to the Deep Cut inbox"; position: fixed; inset: 12px;
+    border: 3px dashed var(--accent); border-radius: 16px; display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 600; background: color-mix(in srgb, var(--bg) 85%, transparent); z-index: 10; }
   @media (max-width: 640px) {
     .cand { grid-template-columns: 52px 1fr; }
     .actions { grid-column: 1 / -1; justify-content: flex-start; }
@@ -72,6 +75,10 @@
   <span class="stat" id="sources"></span>
   <span class="spacer"></span>
   <span class="scanning" id="scanning"></span>
+  <span class="scanning" id="stale" style="display:none">Updates waiting — close the preview to refresh</span>
+  <span class="scanning" id="upmsg"></span>
+  <button id="uploadBtn">Upload to inbox</button>
+  <input type="file" id="uploadInput" multiple accept="video/*,.mkv,.avi,.m2ts,.ts" hidden>
   <button class="primary" id="scanAll">Search all now</button>
 </header>
 <main>
@@ -167,9 +174,14 @@ function render() {
   }).join("");
 }
 
-async function refresh() {
+// The list is rebuilt only when its data changed, and never under an open
+// preview: rebuilding replaces the <iframe>/<video>, which stops playback.
+let lastSig = "", stale = false;
+async function refresh(force = false) {
   try {
     const [f, s] = await Promise.all([api("/api/films"), api("/api/summary")]);
+    const sig = JSON.stringify(f);
+    const changed = sig !== lastSig;
     films = f;
     const last = s.last_scan ? new Date(s.last_scan.at * 1000).toLocaleString() : "never";
     $("#stat").innerHTML = `<b>${s.to_review}</b> to review for <b>${s.films_waiting}</b> films · ${s.missing_tracked} missing tracked · last search ${last}`;
@@ -177,7 +189,9 @@ async function refresh() {
     $("#scanAll").disabled = s.scan.running;
     $("#sources").innerHTML = `Inbox: <b>${esc(s.inbox)}</b> · Vimeo: ${s.vimeo.search ? "search on" : "off"}${s.vimeo.search ? (s.vimeo.cookies ? ", downloads on" : ", downloads need cookies.txt") : ""}`;
     if (f.some(x => x.radarr_id === 0)) await loadMissing();
-    render();
+    if (force || (changed && open.size === 0)) { render(); lastSig = sig; stale = false; }
+    else if (changed) { stale = true; }  // redrawn as soon as the preview is closed
+    $("#stale").style.display = stale ? "" : "none";
   } catch (e) { $("#stat").textContent = "Cannot reach Deep Cut: " + e.message; }
 }
 
@@ -188,7 +202,7 @@ document.addEventListener("click", async e => {
   }
   const act = b.dataset.act, id = b.dataset.id, mv = b.dataset.movie;
   try {
-    if (act === "preview") { open.has(+id) ? open.delete(+id) : open.add(+id); render(); return; }
+    if (act === "preview") { open.has(+id) ? open.delete(+id) : open.add(+id); render(); if (open.size === 0 && stale) refresh(true); return; }
     if (act === "approve") { if (!confirm("Download this and import it into Radarr as this film?")) return; await api(`/api/candidate/${id}/approve`, {}); }
     if (act === "reject" || act === "restore") await api(`/api/candidate/${id}/${act}`, {});
     if (act === "rescan") await api("/api/scan", { movieId: +mv });
@@ -198,11 +212,40 @@ document.addEventListener("click", async e => {
       await api(`/api/candidate/${id}/assign`, { movieId: +sel.value });
     }
     if (act === "dismiss" || act === "undismiss") await api(`/api/film/${mv}/${act}`, {});
-    b.disabled = true; await refresh();
+    b.disabled = true; await refresh(true);
   } catch (err) { alert(err.message); }
 });
 document.addEventListener("change", e => { const s = e.target.closest("select[data-pick]"); if (s) picks[s.dataset.pick] = s.value; });
-$("#scanAll").onclick = async () => { try { await api("/api/scan", {}); refresh(); } catch (e) { alert(e.message); } };
+function uploadOne(file) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", "/api/upload?name=" + encodeURIComponent(file.name));
+    x.upload.onprogress = e => { if (e.lengthComputable) $("#upmsg").textContent = `Uploading ${file.name}: ${Math.floor(e.loaded / e.total * 100)}% of ${(e.total / 1e9).toFixed(2)} GB`; };
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch (_) {} x.status === 200 ? resolve(j.saved) : reject(new Error(j.error || x.status)); };
+    x.onerror = () => reject(new Error("connection lost"));
+    x.send(file);
+  });
+}
+async function uploadFiles(files) {
+  const done = [], failed = [];
+  for (const f of files) {
+    try { done.push(await uploadOne(f)); } catch (e) { failed.push(`${f.name}: ${e.message}`); }
+  }
+  $("#upmsg").textContent = done.length ? `Uploaded ${done.length} file${done.length > 1 ? "s" : ""} — matching now` : "";
+  if (failed.length) alert("Not uploaded:\n" + failed.join("\n"));
+  setTimeout(() => refresh(true), 4000);
+  setTimeout(() => { $("#upmsg").textContent = ""; }, 15000);
+}
+$("#uploadBtn").onclick = () => $("#uploadInput").click();
+$("#uploadInput").onchange = e => { if (e.target.files.length) uploadFiles([...e.target.files]); e.target.value = ""; };
+let dragDepth = 0;
+addEventListener("dragenter", e => { if ([...e.dataTransfer.types].includes("Files")) { dragDepth++; document.body.classList.add("dragging"); } });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove("dragging"); if (e.dataTransfer.files.length) uploadFiles([...e.dataTransfer.files]); });
+addEventListener("beforeunload", e => { if (/Uploading/.test($("#upmsg").textContent)) { e.preventDefault(); e.returnValue = ""; } });
+
+$("#scanAll").onclick = async () => { try { await api("/api/scan", {}); refresh(true); } catch (e) { alert(e.message); } };
 
 refresh(); setInterval(refresh, 8000);
 </script>
