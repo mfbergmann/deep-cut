@@ -7,3 +7,5 @@ autostart
 last_result.json
 started_at
 project_name
+docker-compose.override.yml
+config/

@@ -46,5 +46,5 @@ VIMEO_COOKIES = os.path.join(STATE_DIR, "vimeo-cookies.txt")
 # every INBOX_POLL seconds; matched to a missing film and reviewed like any
 # other candidate.
 INBOX_DIR = os.environ.get("INBOX_DIR", os.path.join(STAGING_DIR, "inbox"))
-INBOX_SHARE = os.environ.get("INBOX_SHARE", r"\\wintermute\data\deepcut\inbox")
+INBOX_SHARE = os.environ.get("INBOX_SHARE", INBOX_DIR)  # how to describe the inbox to a person
 INBOX_POLL = _int("INBOX_POLL", 120)

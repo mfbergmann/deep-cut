@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS movies (
     runtime     INTEGER,          -- minutes, 0 when unknown
     director    TEXT,
     last_scan   REAL,
-    dismissed   INTEGER DEFAULT 0 -- 1 = never search again
+    dismissed   INTEGER DEFAULT 0, -- 1 = never search again
+    on_disc     TEXT              -- Disc Two ISO name when the film is on disc
 );
 CREATE TABLE IF NOT EXISTS candidates (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,6 +51,9 @@ def connect():
 def init():
     with _lock, connect() as con:
         con.executescript(SCHEMA)
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(movies)")}
+        if "on_disc" not in cols:
+            con.execute("ALTER TABLE movies ADD COLUMN on_disc TEXT")
 
 
 def kv_get(key, default=None):
@@ -84,6 +88,11 @@ def movie(radarr_id):
     with connect() as con:
         row = con.execute("SELECT * FROM movies WHERE radarr_id=?", (radarr_id,)).fetchone()
     return dict(row) if row else None
+
+
+def set_on_disc(radarr_id, iso):
+    with _lock, connect() as con:
+        con.execute("UPDATE movies SET on_disc=? WHERE radarr_id=?", (iso, radarr_id))
 
 
 def set_dismissed(radarr_id, value):

@@ -10,7 +10,7 @@ from datetime import datetime
 from . import radarr, scoring, store
 from .config import (MAX_CANDIDATES, MIN_AGE_DAYS, MIN_SCORE, RESCAN_DAYS,
                      SCAN_HOUR, YTDLP_BAKED, YTDLP_LOCAL)
-from . import inbox
+from . import disctwo, inbox
 from .config import INBOX_POLL
 from .sources import archive, vimeo, youtube
 
@@ -109,6 +109,14 @@ def scan(force=False, only_id=None):
             movies = [m for m in all_missing if m["id"] in eligible]
         due = []
         for m in movies:
+            disc = disctwo.owner(m.get("tmdbId"))
+            if disc:
+                if not store.movie(m["id"]):
+                    store.upsert_movie(_movie_info(m))
+                store.set_on_disc(m["id"], disc["iso"])
+                continue
+            if store.movie(m["id"]):
+                store.set_on_disc(m["id"], None)
             known = store.movie(m["id"])
             if known and known.get("dismissed") and not only_id:
                 continue

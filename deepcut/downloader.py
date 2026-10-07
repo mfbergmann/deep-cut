@@ -14,7 +14,7 @@ import threading
 import urllib.request
 
 from . import radarr, store
-from . import inbox
+from . import disctwo, inbox
 from .config import STAGING_DIR, VIMEO_COOKIES
 from .sources.archive import UA
 from .sources.youtube import ytdlp
@@ -101,6 +101,10 @@ def process(cid):
         store.set_state(cid, "new", "choose which film this is before approving")
         return
     m = radarr.movie(c["radarr_id"])
+    disc = disctwo.owner(m.get("tmdbId"))
+    if disc:
+        store.set_state(cid, "failed", f"this film is on disc ({disc['iso']}); import it with Disc Two instead")
+        return
     if m.get("hasFile"):
         store.set_state(cid, "failed", "film already has a file in Radarr; nothing downloaded")
         return

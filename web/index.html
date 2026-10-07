@@ -87,6 +87,7 @@
     <button data-tab="active">Downloading</button>
     <button data-tab="none">Nothing found</button>
     <button data-tab="done">Imported</button>
+    <button data-tab="disc">On disc</button>
     <button data-tab="hidden">Dismissed</button>
   </div>
   <div id="list"></div>
@@ -110,6 +111,7 @@ async function api(path, body) {
 function bucket(f) {
   const cs = f.candidates, st = s => cs.some(c => c.state === s);
   if (f.dismissed) return "hidden";
+  if (f.on_disc) return "disc";
   if (st("imported")) return "done";
   if (st("queued") || st("downloading") || st("failed")) return "active";
   if (st("new")) return "review";
@@ -123,7 +125,8 @@ function candRow(f, c) {
     : c.source === "inbox" ? `in the inbox · ${(c.meta.size / 1e9).toFixed(2)} GB`
     : `${esc(c.meta.channel || "")}${c.meta.resolution ? " · " + esc(c.meta.resolution) : ""}${c.meta.views ? " · " + Number(c.meta.views).toLocaleString() + " views" : ""}`;
   let actions = "";
-  if (c.state === "new" && f.radarr_id === 0) actions = `
+  if (f.on_disc && c.state === "new") actions = `<span class="state">on disc</span>`;
+  else if (c.state === "new" && f.radarr_id === 0) actions = `
       <button data-act="preview" data-id="${c.id}">${open.has(c.id) ? "Hide" : "Preview"}</button>
       <select data-pick="${c.id}"><option value="">Which film is this?</option>${(missing || []).map(m => `<option value="${m.id}"${picks[c.id] == m.id ? " selected" : ""}>${esc(m.title)} (${m.year || "?"})</option>`).join("")}</select>
       <button class="ok" data-act="assign" data-id="${c.id}">Assign</button>`;
@@ -153,7 +156,7 @@ function candRow(f, c) {
 function render() {
   const shown = films.filter(f => bucket(f) === tab);
   if (!shown.length) {
-    $("#list").innerHTML = `<div class="empty">${{ review: "Nothing waiting for review.", active: "Nothing downloading.", none: "No films without results.", done: "Nothing imported yet.", hidden: "Nothing dismissed." }[tab]}</div>`;
+    $("#list").innerHTML = `<div class="empty">${{ review: "Nothing waiting for review.", active: "Nothing downloading.", none: "No films without results.", done: "Nothing imported yet.", hidden: "Nothing dismissed.", disc: "No missing films are on disc." }[tab]}</div>`;
     return;
   }
   $("#list").innerHTML = shown.map(f => {
@@ -169,7 +172,8 @@ function render() {
         ${f.radarr_id === 0 ? "" : `<button data-act="rescan" data-movie="${f.radarr_id}">Search again</button>
         <button data-act="${f.dismissed ? "undismiss" : "dismiss"}" data-movie="${f.radarr_id}">${f.dismissed ? "Restore" : "Dismiss film"}</button>`}
       </div>
-      ${cs.length ? cs.map(c => candRow(f, c)).join("") : `<div class="none">No candidates from the last search.</div>`}
+      ${f.on_disc ? `<div class="none">On disc: <b>${esc(f.on_disc)}</b>. Disc Two is handling this film, so Deep Cut will not fetch a web copy. Import the feature in <a href="http://${location.hostname}:8472/" target="_blank" rel="noopener">Disc Two</a>.</div>` : ""}
+      ${cs.length ? cs.map(c => candRow(f, c)).join("") : (f.on_disc ? "" : `<div class="none">No candidates from the last search.</div>`)}
     </section>`;
   }).join("");
 }

@@ -14,7 +14,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import downloader, inbox, radarr, scanner, store
+from . import disctwo, downloader, inbox, radarr, scanner, store
 from .config import INBOX_SHARE, VIMEO_COOKIES, WEB_PORT
 from .sources import vimeo
 
@@ -44,6 +44,7 @@ def summary():
         "scan": scanner.status,
         "vimeo": {"search": vimeo.enabled(), "cookies": os.path.exists(VIMEO_COOKIES)},
         "inbox": INBOX_SHARE,
+        "disctwo": disctwo.enabled(),
     }
 
 
@@ -189,6 +190,9 @@ class Handler(BaseHTTPRequestHandler):
             if action == "approve":
                 if c["radarr_id"] == inbox.UNMATCHED:
                     return self._json({"error": "choose which film this is first"}, 409)
+                film = store.movie(c["radarr_id"]) or {}
+                if film.get("on_disc"):
+                    return self._json({"error": f"this film is on disc ({film['on_disc']}); import it with Disc Two instead"}, 409)
                 if c["state"] not in ("new", "failed"):
                     return self._json({"error": f"candidate is {c['state']}"}, 409)
                 downloader.enqueue(cid)
