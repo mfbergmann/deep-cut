@@ -10,7 +10,9 @@ from datetime import datetime
 from . import radarr, scoring, store
 from .config import (MAX_CANDIDATES, MIN_AGE_DAYS, MIN_SCORE, RESCAN_DAYS,
                      SCAN_HOUR, YTDLP_BAKED, YTDLP_LOCAL)
-from .sources import archive, youtube
+from . import inbox
+from .config import INBOX_POLL
+from .sources import archive, vimeo, youtube
 
 log = logging.getLogger("deepcut.scan")
 
@@ -55,6 +57,7 @@ def search_movie(m):
     sources = [
         ("archive", lambda: archive.candidates(scoring_movie["titles"], info["year"], info["director"])),
         ("youtube", lambda: youtube.candidates(scoring_movie["titles"], info["year"], info["director"])),
+        ("vimeo", lambda: vimeo.candidates(scoring_movie["titles"])),
     ]
     for name, fn in sources:
         detailed = 0
@@ -95,12 +98,15 @@ def scan(force=False, only_id=None):
     try:
         status.update(running=True, done=0, total=0, current=None, last_error=None)
         ensure_ytdlp()
-        min_age = 0 if only_id else MIN_AGE_DAYS
-        movies = radarr.missing_movies(min_age)
+        all_missing = radarr.missing_movies(0)
         if only_id:
-            movies = [m for m in movies if m["id"] == only_id]
+            movies = [m for m in all_missing if m["id"] == only_id]
         else:
-            store.drop_movies_not_in([m["id"] for m in movies])
+            # Forget films that are no longer missing at all -- not merely
+            # those too new to search, which may already have inbox files.
+            store.drop_movies_not_in([m["id"] for m in all_missing])
+            eligible = {m["id"] for m in radarr.missing_movies(MIN_AGE_DAYS)}
+            movies = [m for m in all_missing if m["id"] in eligible]
         due = []
         for m in movies:
             known = store.movie(m["id"])
@@ -134,16 +140,25 @@ def start_scan(force=False, only_id=None):
     t.start()
 
 
+def _poll_inbox():
+    try:
+        inbox.poll()
+    except Exception:
+        log.exception("inbox poll failed")
+
+
 def scheduler():
-    """Daily scan at SCAN_HOUR; also once at startup if the last one is stale."""
+    """Inbox every INBOX_POLL seconds; full search daily at SCAN_HOUR (and at
+    startup if the last one is stale)."""
+    _poll_inbox()
     last = store.kv_get("last_scan") or {}
     if time.time() - last.get("at", 0) > 86400:
         time.sleep(30)
         scan()
     while True:
-        now = datetime.now()
-        if now.hour == SCAN_HOUR:
+        _poll_inbox()
+        if datetime.now().hour == SCAN_HOUR:
             last = store.kv_get("last_scan") or {}
             if time.time() - last.get("at", 0) > 20 * 3600:
                 scan()
-        time.sleep(600)
+        time.sleep(INBOX_POLL)

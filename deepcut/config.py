@@ -35,3 +35,16 @@ MAX_CANDIDATES = _int("MAX_CANDIDATES", 6)
 # image rebuild. The baked-in copy is the fallback.
 YTDLP_LOCAL = os.path.join(STATE_DIR, "bin", "yt-dlp")
 YTDLP_BAKED = "/usr/local/bin/yt-dlp"
+
+# Vimeo: the API token searches; downloads need a logged-in browser session
+# exported as cookies.txt, because Vimeo refuses its web client to anyone not
+# logged in and blocks non-browser clients outright.
+VIMEO_TOKEN = os.environ.get("VIMEO_TOKEN", "")
+VIMEO_COOKIES = os.path.join(STATE_DIR, "vimeo-cookies.txt")
+
+# Files a person fetched themselves (Downie, a rip, a friend's copy). Watched
+# every INBOX_POLL seconds; matched to a missing film and reviewed like any
+# other candidate.
+INBOX_DIR = os.environ.get("INBOX_DIR", os.path.join(STAGING_DIR, "inbox"))
+INBOX_SHARE = os.environ.get("INBOX_SHARE", r"\\wintermute\data\deepcut\inbox")
+INBOX_POLL = _int("INBOX_POLL", 120)

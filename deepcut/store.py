@@ -140,6 +140,19 @@ def set_state(cid, state, error=None):
         )
 
 
+def delete_candidate(cid):
+    with _lock, connect() as con:
+        con.execute("DELETE FROM candidates WHERE id=?", (cid,))
+
+
+def reassign(cid, radarr_id, reasons):
+    with _lock, connect() as con:
+        con.execute(
+            "UPDATE candidates SET radarr_id=?, reasons=?, updated=? WHERE id=?",
+            (radarr_id, json.dumps(reasons), time.time(), cid),
+        )
+
+
 def _cand(row):
     d = dict(row)
     d["reasons"] = json.loads(d["reasons"] or "[]")
@@ -167,7 +180,7 @@ def drop_movies_not_in(ids):
         rows = con.execute("SELECT radarr_id FROM movies").fetchall()
         for r in rows:
             rid = r["radarr_id"]
-            if rid in ids:
+            if rid in ids or rid == 0:  # 0 = unmatched inbox files
                 continue
             busy = con.execute(
                 "SELECT 1 FROM candidates WHERE radarr_id=? AND state IN ('imported','queued','downloading')",

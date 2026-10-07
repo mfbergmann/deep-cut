@@ -14,7 +14,8 @@ import threading
 import urllib.request
 
 from . import radarr, store
-from .config import STAGING_DIR
+from . import inbox
+from .config import STAGING_DIR, VIMEO_COOKIES
 from .sources.archive import UA
 from .sources.youtube import ytdlp
 
@@ -57,9 +58,47 @@ def _fetch_youtube(url, dest_dir):
         raise RuntimeError("yt-dlp: " + " | ".join(tail))
 
 
+VIMEO_HELP = ("Vimeo needs a logged-in session: export cookies.txt from a browser logged in to "
+              "vimeo.com and save it as appdata/deep-cut/vimeo-cookies.txt -- or download the video "
+              "yourself (e.g. with Downie) and drop it in the inbox.")
+
+
+def _fetch_vimeo(url, dest_dir):
+    if not os.path.exists(VIMEO_COOKIES):
+        raise RuntimeError(VIMEO_HELP)
+    p = subprocess.run(
+        [ytdlp(), "--no-update", "--no-playlist", "--impersonate", "chrome",
+         "--cookies", VIMEO_COOKIES, "-f", "bv*+ba/b", "--merge-output-format", "mkv",
+         "--no-part", "--restrict-filenames",
+         "-o", os.path.join(dest_dir, "%(title).120B [vimeo-%(id)s].%(ext)s"), url],
+        capture_output=True, text=True, timeout=6 * 3600,
+    )
+    if p.returncode != 0:
+        err = (p.stderr or p.stdout).strip()
+        if "logged-in" in err or "cookies" in err.lower():
+            raise RuntimeError("Vimeo login expired or refused. " + VIMEO_HELP)
+        raise RuntimeError("yt-dlp: " + " | ".join(err.splitlines()[-3:]))
+
+
+def _take_from_inbox(rel, dest_dir):
+    src = inbox.path_of(rel)
+    if not src or not os.path.isfile(src):
+        raise RuntimeError("the file is no longer in the inbox")
+    shutil.move(src, os.path.join(dest_dir, os.path.basename(src)))
+    parent = os.path.dirname(src)
+    if os.path.realpath(parent) != os.path.realpath(inbox.INBOX_DIR):
+        try:
+            os.rmdir(parent)  # remove a now-empty wrapper folder
+        except OSError:
+            pass
+
+
 def process(cid):
     c = store.candidate(cid)
     if not c or c["state"] not in ("queued", "downloading"):
+        return
+    if c["radarr_id"] == inbox.UNMATCHED:
+        store.set_state(cid, "new", "choose which film this is before approving")
         return
     m = radarr.movie(c["radarr_id"])
     if m.get("hasFile"):
@@ -90,6 +129,10 @@ def process(cid):
             log.info("reusing finished download for candidate %s", cid)
         elif c["source"] == "archive":
             _fetch_archive(c["download"], dest, c["meta"].get("file") or "video")
+        elif c["source"] == "vimeo":
+            _fetch_vimeo(c["download"], dest)
+        elif c["source"] == "inbox":
+            _take_from_inbox(c["download"], dest)
         else:
             _fetch_youtube(c["download"], dest)
         ok, msg = radarr.manual_import(c["radarr_id"], dest)

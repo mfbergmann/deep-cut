@@ -11,6 +11,9 @@ RUN set -eux; \
     chmod +x /usr/local/bin/yt-dlp; \
     apt-get purge -y unzip; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
 
+# curl_cffi: yt-dlp's browser impersonation; Vimeo rejects non-browser clients.
+RUN pip install --no-cache-dir curl_cffi
+
 COPY deepcut/ /app/deepcut/
 COPY web/ /app/web/
 

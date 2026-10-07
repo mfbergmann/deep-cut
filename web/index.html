@@ -69,6 +69,7 @@
 <header>
   <h1><img src="/logo.svg" alt="">Deep Cut</h1>
   <span class="stat" id="stat"></span>
+  <span class="stat" id="sources"></span>
   <span class="spacer"></span>
   <span class="scanning" id="scanning"></span>
   <button class="primary" id="scanAll">Search all now</button>
@@ -85,7 +86,9 @@
 </main>
 <script>
 const $ = s => document.querySelector(s);
-let films = [], tab = "review", open = new Set();
+let films = [], tab = "review", open = new Set(), missing = null, picks = {};
+const SRC = { archive: "Internet Archive", youtube: "YouTube", vimeo: "Vimeo", inbox: "Inbox" };
+async function loadMissing() { if (!missing) { try { missing = await api("/api/missing"); } catch (e) { missing = []; } } return missing; }
 
 function mmss(s) {
   s = Math.round(s || 0); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
@@ -110,9 +113,14 @@ function candRow(f, c) {
   const cls = c.score >= 70 ? "hi" : c.score >= 55 ? "mid" : "";
   const extra = c.source === "archive"
     ? `${c.meta.original ? "original upload" : "derivative"} · ${c.meta.resolution} · ${(c.meta.size / 1e9).toFixed(2)} GB`
+    : c.source === "inbox" ? `in the inbox · ${(c.meta.size / 1e9).toFixed(2)} GB`
     : `${esc(c.meta.channel || "")}${c.meta.resolution ? " · " + esc(c.meta.resolution) : ""}${c.meta.views ? " · " + Number(c.meta.views).toLocaleString() + " views" : ""}`;
   let actions = "";
-  if (c.state === "new") actions = `
+  if (c.state === "new" && f.radarr_id === 0) actions = `
+      <button data-act="preview" data-id="${c.id}">${open.has(c.id) ? "Hide" : "Preview"}</button>
+      <select data-pick="${c.id}"><option value="">Which film is this?</option>${(missing || []).map(m => `<option value="${m.id}"${picks[c.id] == m.id ? " selected" : ""}>${esc(m.title)} (${m.year || "?"})</option>`).join("")}</select>
+      <button class="ok" data-act="assign" data-id="${c.id}">Assign</button>`;
+  else if (c.state === "new") actions = `
       <button data-act="preview" data-id="${c.id}">${open.has(c.id) ? "Hide" : "Preview"}</button>
       <button class="ok" data-act="approve" data-id="${c.id}">Approve</button>
       <button data-act="reject" data-id="${c.id}">Reject</button>`;
@@ -122,13 +130,16 @@ function candRow(f, c) {
   return `<div class="cand">
     <div class="score ${cls}" title="match score">${c.score}</div>
     <div>
-      <div class="ctitle"><span class="src">${c.source === "archive" ? "Internet Archive" : "YouTube"}</span><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></div>
+      <div class="ctitle"><span class="src">${SRC[c.source] || c.source}</span><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a></div>
       <div class="reasons">${c.duration ? `<span>${mmss(c.duration)}</span>` : ""}${c.reasons.map(r => `<span>${esc(r)}</span>`).join("")}</div>
       <div class="reasons">${extra}</div>
       ${c.error ? `<div class="err">${esc(c.error)}</div>` : ""}
     </div>
     <div class="actions">${actions}</div>
-    ${open.has(c.id) ? `<iframe class="preview" src="${esc(c.preview)}" allow="fullscreen; encrypted-media" allowfullscreen loading="lazy"></iframe>` : ""}
+    ${!open.has(c.id) ? "" :
+      c.source === "inbox" ? `<video class="preview" src="${esc(c.preview)}" controls preload="metadata"></video>` :
+      c.source === "vimeo" && c.meta.embeddable === false ? `<div class="none" style="grid-column:1/-1">The uploader does not allow embedding. <a href="${esc(c.url)}" target="_blank" rel="noopener">Watch on Vimeo</a>.</div>` :
+      `<iframe class="preview" src="${esc(c.preview)}" allow="fullscreen; encrypted-media" allowfullscreen loading="lazy"></iframe>`}
   </div>`;
 }
 
@@ -145,11 +156,11 @@ function render() {
     const scanned = f.last_scan ? new Date(f.last_scan * 1000).toLocaleDateString() : "never";
     return `<section class="film">
       <div class="film-head">
-        <h2>${esc(f.title)} <span class="meta">(${f.year || "?"})</span></h2>
-        <span class="meta">${f.director ? esc(f.director) + " · " : ""}${f.runtime ? f.runtime + " min" : "runtime unknown"} · searched ${scanned}${rejected ? ` · ${rejected} rejected` : ""}</span>
+        <h2>${esc(f.title)}${f.radarr_id === 0 ? "" : ` <span class="meta">(${f.year || "?"})</span>`}</h2>
+        ${f.radarr_id === 0 ? `<span class="meta">files in the inbox that did not match a missing film</span>` : `<span class="meta">${f.director ? esc(f.director) + " · " : ""}${f.runtime ? f.runtime + " min" : "runtime unknown"} · searched ${scanned}${rejected ? ` · ${rejected} rejected` : ""}</span>`}
         <span class="spacer"></span>
-        <button data-act="rescan" data-movie="${f.radarr_id}">Search again</button>
-        <button data-act="${f.dismissed ? "undismiss" : "dismiss"}" data-movie="${f.radarr_id}">${f.dismissed ? "Restore" : "Dismiss film"}</button>
+        ${f.radarr_id === 0 ? "" : `<button data-act="rescan" data-movie="${f.radarr_id}">Search again</button>
+        <button data-act="${f.dismissed ? "undismiss" : "dismiss"}" data-movie="${f.radarr_id}">${f.dismissed ? "Restore" : "Dismiss film"}</button>`}
       </div>
       ${cs.length ? cs.map(c => candRow(f, c)).join("") : `<div class="none">No candidates from the last search.</div>`}
     </section>`;
@@ -164,6 +175,8 @@ async function refresh() {
     $("#stat").innerHTML = `<b>${s.to_review}</b> to review for <b>${s.films_waiting}</b> films · ${s.missing_tracked} missing tracked · last search ${last}`;
     $("#scanning").textContent = s.scan.running ? `Searching ${s.scan.done}/${s.scan.total}${s.scan.current ? ": " + s.scan.current : ""}…` : (s.scan.last_error ? "Last search failed: " + s.scan.last_error : "");
     $("#scanAll").disabled = s.scan.running;
+    $("#sources").innerHTML = `Inbox: <b>${esc(s.inbox)}</b> · Vimeo: ${s.vimeo.search ? "search on" : "off"}${s.vimeo.search ? (s.vimeo.cookies ? ", downloads on" : ", downloads need cookies.txt") : ""}`;
+    if (f.some(x => x.radarr_id === 0)) await loadMissing();
     render();
   } catch (e) { $("#stat").textContent = "Cannot reach Deep Cut: " + e.message; }
 }
@@ -179,10 +192,16 @@ document.addEventListener("click", async e => {
     if (act === "approve") { if (!confirm("Download this and import it into Radarr as this film?")) return; await api(`/api/candidate/${id}/approve`, {}); }
     if (act === "reject" || act === "restore") await api(`/api/candidate/${id}/${act}`, {});
     if (act === "rescan") await api("/api/scan", { movieId: +mv });
+    if (act === "assign") {
+      const sel = document.querySelector(`select[data-pick="${id}"]`);
+      if (!sel || !sel.value) { alert("Choose the film first."); return; }
+      await api(`/api/candidate/${id}/assign`, { movieId: +sel.value });
+    }
     if (act === "dismiss" || act === "undismiss") await api(`/api/film/${mv}/${act}`, {});
     b.disabled = true; await refresh();
   } catch (err) { alert(err.message); }
 });
+document.addEventListener("change", e => { const s = e.target.closest("select[data-pick]"); if (s) picks[s.dataset.pick] = s.value; });
 $("#scanAll").onclick = async () => { try { await api("/api/scan", {}); refresh(); } catch (e) { alert(e.message); } };
 
 refresh(); setInterval(refresh, 8000);

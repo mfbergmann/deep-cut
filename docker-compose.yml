@@ -11,6 +11,7 @@ services:
       - TZ=${TZ:-America/Toronto}
       - RADARR_URL=http://radarr:7878
       - RADARR_API_KEY=${RADARR_API_KEY}
+      - VIMEO_TOKEN=${VIMEO_TOKEN:-}
       - MIN_AGE_DAYS=${MIN_AGE_DAYS:-14}
       - RESCAN_DAYS=${RESCAN_DAYS:-7}
       - SCAN_HOUR=${SCAN_HOUR:-3}

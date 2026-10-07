@@ -15,10 +15,23 @@ Web UI: `http://<host>:8473` · Homepage tile: Media Management → Deep Cut
    monitored, released (`isAvailable`), has no file, is not in Radarr's queue,
    and was added more than `MIN_AGE_DAYS` (14) ago. A film is searched again
    after `RESCAN_DAYS` (7). Films that get a file drop off automatically.
-2. **Where.** Internet Archive (search API plus per-item metadata, which gives
-   exact file durations and the uploader's *original* file) and YouTube (via
-   `yt-dlp` flat search). Each source is queried by title, then narrowed by
-   year and director, plus the part of the title before a colon.
+2. **Where.**
+   - **Internet Archive**: search API plus per-item metadata, which gives exact
+     file durations and the uploader's *original* file. Queried by title, then
+     narrowed by year and director, plus the part of the title before a colon.
+   - **YouTube**: `yt-dlp` flat search, then full metadata for the plausible
+     hits, because a re-score is usually admitted only in the description.
+   - **Vimeo**: the API (`VIMEO_TOKEN`, public scope). Its search ANDs every
+     word against the title, so each title variant is queried bare. Downloads
+     need a logged-in session: `appdata/deep-cut/vimeo-cookies.txt` (a
+     cookies.txt containing **only** vimeo.com cookies), used through
+     `yt-dlp --impersonate chrome`. Vimeo blocks every anonymous server-side
+     route, including its oEmbed and player endpoints.
+   - **The inbox**: `\\wintermute\data\deepcut\inbox`. Drop in a file you got
+     yourself (Downie, a rip). Once its size holds still it is matched to a
+     missing film, by `tmdb-123` / `radarr-123` in the name if present,
+     otherwise by title and runtime. Unmatched files get a film picker. Approve
+     moves it out of the inbox and imports it. Previews stream in the page.
 3. **Scoring (0–100).** Runtime against TMDB's is the strongest signal (±5% =
    40 points; under half the length is rejected outright as a trailer or clip).
    Title words must match (under 50% coverage is rejected; under 75% caps the
@@ -68,6 +81,9 @@ JavaScript runtime yt-dlp needs for YouTube's player challenges.
 | POST | `/api/scan` | `{}` = all films now; `{"movieId": N}` = one film |
 | POST | `/api/candidate/<id>/approve\|reject\|restore` | |
 | POST | `/api/film/<radarrId>/dismiss\|undismiss` | |
+| POST | `/api/candidate/<id>/assign` | `{"movieId": N}`, for an unmatched inbox file |
+| GET | `/api/missing` | missing films, for the picker |
+| GET | `/api/inbox-file/<path>` | streams an inbox file (Range-aware) for preview |
 
 ## Not (yet) included
 
